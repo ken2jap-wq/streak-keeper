@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Streak Keeper</title>
+  <meta name="theme-color" content="#101014">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Streak">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app">
+    <!-- First-launch setup -->
+    <section class="view hidden" id="view-setup">
+      <h1 class="title">はじめる準備</h1>
+      <p class="sub">毎日チェックするルーティンを決めましょう。あとから設定でいつでも変えられます。</p>
+
+      <div class="card">
+        <div class="card-head"><h2>テンプレート</h2></div>
+        <div class="row-buttons" id="preset-buttons"></div>
+      </div>
+
+      <details class="card" id="restore-card">
+        <summary><h2>スプレッドシートから復元する</h2></summary>
+        <p class="hint">機種変更やブラウザのデータ消去のあとは、スプレッドシートに残っている記録から元に戻せます。</p>
+        <form class="add-col" id="restore-form">
+          <label class="field">
+            <span>連携URL（Apps Script のウェブアプリURL）</span>
+            <input id="restore-url" type="url" placeholder="https://script.google.com/macros/s/…/exec" required>
+          </label>
+          <label class="field">
+            <span>前に使っていた名前</span>
+            <input id="restore-name" maxlength="30" required>
+          </label>
+          <button class="btn small">復元する</button>
+        </form>
+      </details>
+
+      <form class="card add-col" id="setup-form">
+        <label class="field">
+          <span>名前（スプレッドシートの記録に使います）</span>
+          <input id="setup-name" maxlength="30" placeholder="例：たろう" required>
+        </label>
+        <label class="field">
+          <span>開始日</span>
+          <input id="setup-start" type="date" required>
+        </label>
+        <label class="field">
+          <span>毎日のチェックリスト（1行に1つ）</span>
+          <textarea id="setup-routines" rows="8" placeholder="例：&#10;6時に起きる&#10;30分読書"></textarea>
+        </label>
+        <button class="btn primary big">この内容ではじめる</button>
+      </form>
+    </section>
+
+    <!-- Home -->
+    <section class="view" id="view-home">
+      <header class="hero">
+        <div class="flame" aria-hidden="true">🔥</div>
+        <div class="streak-num" id="streak-num">0</div>
+        <div class="streak-label">日 連続達成中</div>
+        <div class="best">自己ベスト <span id="best-num">0</span> 日</div>
+      </header>
+
+      <div class="banner danger hidden" id="penalty-banner">
+        <strong>未執行の罰があります</strong>
+        <span id="penalty-banner-text"></span>
+        <button class="btn small" data-goto="roulette">ルーレットへ</button>
+      </div>
+
+      <div class="card" id="today-card">
+        <div class="card-head">
+          <h2>今日の報告</h2>
+          <span class="date" id="today-date"></span>
+        </div>
+        <p class="deadline" id="deadline"></p>
+        <ul class="checklist" id="checklist"></ul>
+        <div class="report-actions" id="report-actions">
+          <button class="btn primary" id="btn-done">✅ 完了を報告</button>
+          <button class="btn ghost" id="btn-fail">❌ 未完了を報告</button>
+        </div>
+        <div class="reported hidden" id="reported"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>直近14日</h2></div>
+        <div class="calendar" id="calendar"></div>
+        <div class="legend">
+          <span><i class="dot done"></i>完了</span>
+          <span><i class="dot failed"></i>未完了</span>
+          <span><i class="dot missed"></i>未報告</span>
+        </div>
+      </div>
+
+      <div class="card install-tip hidden" id="install-tip">
+        <h2>ホーム画面にストリークを表示</h2>
+        <p>Safariの共有ボタン →「ホーム画面に追加」でアプリとして追加し、アプリから通知を許可すると、アイコンのバッジに連続日数が表示されます。</p>
+        <button class="btn small" id="btn-badge">バッジ表示を有効にする</button>
+      </div>
+    </section>
+
+    <!-- Roulette -->
+    <section class="view hidden" id="view-roulette">
+      <h1 class="title">罰ゲームルーレット</h1>
+      <p class="sub" id="roulette-sub"></p>
+      <div class="wheel-wrap">
+        <div class="pointer" aria-hidden="true"></div>
+        <canvas id="wheel" width="640" height="640"></canvas>
+      </div>
+      <button class="btn primary big" id="btn-spin">ルーレットを回す</button>
+
+      <div class="card">
+        <div class="card-head"><h2>罰の履歴</h2></div>
+        <ul class="penalty-list" id="penalty-list"></ul>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section class="view hidden" id="view-settings">
+      <h1 class="title">設定</h1>
+
+      <div class="card">
+        <div class="card-head"><h2>プロフィール</h2></div>
+        <form class="add-col" id="profile-form">
+          <label class="field">
+            <span>名前</span>
+            <input id="profile-name" maxlength="30" required>
+          </label>
+          <label class="field">
+            <span>開始日</span>
+            <input id="profile-start" type="date" required>
+          </label>
+          <button class="btn small">保存</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>毎日のルーティン</h2></div>
+        <ul class="edit-list" id="routine-list"></ul>
+        <form class="add-row" id="routine-form">
+          <input id="routine-input" placeholder="例：6時に起きる" maxlength="40" required>
+          <button class="btn small">追加</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>ルーレットの罰</h2></div>
+        <p class="hint">罰金は5,000円以上がおすすめ。自分が本気で嫌だと思う内容にしてください。</p>
+        <ul class="edit-list" id="sanction-list"></ul>
+        <form class="add-col" id="sanction-form">
+          <input id="sanction-title" placeholder="罰のタイトル" maxlength="30" required>
+          <textarea id="sanction-detail" placeholder="具体的な内容（誰に・いくら・どうやって）" rows="2"></textarea>
+          <button class="btn small">罰を追加</button>
+        </form>
+        <button class="btn ghost small" id="btn-reset-sanctions">罰をデフォルトに戻す</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Googleスプレッドシート連携</h2></div>
+        <p class="hint">報告・ルーレット結果・罰の実行をスプレッドシートに1行ずつ記録します。設定方法は README の「スプレッドシート連携」を参照してください。</p>
+        <form class="add-col" id="sync-form">
+          <input id="sync-url" type="url" placeholder="https://script.google.com/macros/s/…/exec">
+          <div class="row-buttons">
+            <button class="btn small">保存</button>
+            <button class="btn small ghost" type="button" id="btn-sync-test">テスト送信</button>
+          </div>
+        </form>
+        <p class="hint" id="sync-status"></p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>データ</h2></div>
+        <div class="row-buttons">
+          <button class="btn small" id="btn-export">バックアップを書き出す</button>
+          <label class="btn small">読み込む<input type="file" id="import-file" accept="application/json" hidden></label>
+        </div>
+        <button class="btn ghost small danger-text" id="btn-wipe">すべてリセット</button>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-goto="home" class="active"><span>🔥</span>ホーム</button>
+    <button data-goto="roulette"><span>🎯</span>ルーレット<i class="tab-badge hidden" id="tab-badge"></i></button>
+    <button data-goto="settings"><span>⚙️</span>設定</button>
+  </nav>
+
+  <div class="modal hidden" id="modal">
+    <div class="modal-box">
+      <div class="modal-kicker" id="modal-kicker"></div>
+      <h2 id="modal-title"></h2>
+      <p id="modal-body"></p>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+
+  <script src="sanctions.js"></script>
+  <script src="presets.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
