@@ -35,7 +35,7 @@
 - `gas/Code.gs` を更新したときは、Apps Script で「デプロイを管理」→ 編集 →「新バージョン」で再デプロイしてください（URLは変わりません）。
 
 ## iPhoneで使う
-1. このフォルダをHTTPSで公開する（例：GitHub Pages で `routine-app/` を公開）。
+1. https://ken2jap-wq.github.io/streak-keeper/ を開く（GitHub Pages で公開）。
 2. iPhoneのSafariで開き、共有ボタン →「ホーム画面に追加」。
 3. ホーム画面のアイコンから起動し、ホームの「バッジ表示を有効にする」で通知を許可。
 
@@ -43,7 +43,7 @@
 
 ## ローカルで試す
 ```sh
-cd routine-app
+cd streak-keeper
 python3 -m http.server 8000
 # http://localhost:8000 を開く
 ```
