@@ -76,8 +76,12 @@
 
       <div class="card" id="today-card">
         <div class="card-head">
-          <h2>今日の報告</h2>
+          <h2 id="report-title">今日の報告</h2>
           <span class="date" id="today-date"></span>
+        </div>
+        <div class="day-tabs hidden" id="day-tabs" role="tablist">
+          <button class="day-tab" id="tab-yesterday" role="tab"></button>
+          <button class="day-tab" id="tab-today" role="tab"></button>
         </div>
         <p class="deadline" id="deadline"></p>
         <ul class="checklist" id="checklist"></ul>

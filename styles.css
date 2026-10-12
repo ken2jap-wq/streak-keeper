@@ -95,6 +95,12 @@ html, body {
 .btn.big { width: 100%; font-size: 18px; padding: 18px; margin-top: 8px; }
 .danger-text { color: var(--ng); margin-top: 10px; }
 
+/* Yesterday / today switch, shown while yesterday can still be reported */
+.day-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin-bottom: 12px; background: var(--surface-2); border-radius: 12px; }
+.day-tab { appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 700; padding: 9px 6px; border-radius: 9px; cursor: pointer; }
+.day-tab.active { background: var(--surface); color: var(--text); }
+.day-tab .pending { color: var(--accent); }
+
 .report-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .reported { padding: 14px; border-radius: 12px; text-align: center; font-weight: 700; }
 .reported.done { background: rgba(47, 191, 113, .15); color: var(--ok); }

@@ -76,9 +76,10 @@
   // failure: it breaks the streak and owes one roulette spin.
   const reconcile = () => {
     if (!state.setupDone) return;
-    const today = todayKey();
+    // Yesterday can still be reported today, so only older days count as missed.
+    const yesterday = addDays(todayKey(), -1);
     let changed = false;
-    for (let d = state.startDate; d < today; d = addDays(d, 1)) {
+    for (let d = state.startDate; d < yesterday; d = addDays(d, 1)) {
       if (!state.reports[d]) {
         state.reports[d] = { status: 'missed', done: [] };
         addPenalty(d, 'missed');
@@ -175,8 +176,10 @@
     const today = todayKey();
     let n = 0;
     let d = today;
-    // Today still open (not yet reported) does not break the streak.
-    if (!state.reports[today]) d = addDays(today, -1);
+    // Days still open for reporting (today, and yesterday until today ends)
+    // do not break the streak.
+    if (!state.reports[d]) d = addDays(d, -1);
+    if (!state.reports[d] && openDays().includes(d)) d = addDays(d, -1);
     while (d >= state.startDate && state.reports[d]?.status === 'done') {
       n++;
       d = addDays(d, -1);
@@ -197,6 +200,12 @@
       }
     }
     return best;
+  };
+
+  // Days that can still be reported, oldest first: yesterday (until today ends) and today.
+  const openDays = () => {
+    const today = todayKey();
+    return [addDays(today, -1), today].filter((d) => d >= state.startDate && !state.reports[d]);
   };
 
   const unspun = () => state.penalties.filter((p) => !p.sanction);
@@ -255,16 +264,49 @@
 
   // ---------- home ----------
   let checked = new Set();
+  let pickedDate = null; // the day the user switched the report card to
+
+  // The day being reported on: yesterday first while it is still open.
+  const reportDate = () => {
+    const open = openDays();
+    if (pickedDate && (open.includes(pickedDate) || pickedDate === todayKey())) return pickedDate;
+    return open[0] || todayKey();
+  };
+
+  const pickDate = (d) => {
+    if (d === reportDate()) return;
+    pickedDate = d;
+    checked = new Set();
+    renderHome();
+  };
+  $('tab-yesterday').addEventListener('click', () => pickDate(addDays(todayKey(), -1)));
+  $('tab-today').addEventListener('click', () => pickDate(todayKey()));
 
   const renderHome = () => {
     const today = todayKey();
+    const yesterday = addDays(today, -1);
+    const date = reportDate();
+    const isYesterday = date === yesterday;
     const streak = currentStreak();
     $('streak-num').textContent = streak;
     $('streak-num').classList.toggle('zero', streak === 0);
     $('best-num').textContent = bestStreak();
-    $('today-date').textContent = fmtDate(today);
+    $('report-title').textContent = isYesterday ? '昨日の報告' : '今日の報告';
+    $('today-date').textContent = fmtDate(date);
 
-    const report = state.reports[today];
+    const yesterdayOpen = openDays().includes(yesterday);
+    $('day-tabs').classList.toggle('hidden', !yesterdayOpen);
+    if (yesterdayOpen) {
+      $('tab-yesterday').replaceChildren(`昨日 ${fmtDate(yesterday)} `, el('span', { class: 'pending' }, '未報告'));
+      const todayReported = !!state.reports[today];
+      $('tab-today').textContent = `今日 ${fmtDate(today)}${todayReported ? ' 報告済み' : ''}`;
+      $('tab-yesterday').classList.toggle('active', isYesterday);
+      $('tab-today').classList.toggle('active', !isYesterday);
+      $('tab-yesterday').setAttribute('aria-selected', String(isYesterday));
+      $('tab-today').setAttribute('aria-selected', String(!isYesterday));
+    }
+
+    const report = state.reports[date];
     const list = $('checklist');
     list.replaceChildren();
     if (!state.routines.length) {
@@ -283,13 +325,14 @@
       list.append(el('li', {}, el('label', {}, cb, el('span', {}, r.name))));
     }
 
-    const notStarted = today < state.startDate;
+    const notStarted = date < state.startDate;
     $('report-actions').classList.toggle('hidden', !!report || notStarted);
     const reported = $('reported');
     reported.classList.toggle('hidden', !report);
     reported.className = `reported ${report ? report.status : ''} ${report ? '' : 'hidden'}`;
-    if (report?.status === 'done') reported.textContent = '今日のルーティン完了！明日も続けよう 🔥';
-    if (report?.status === 'failed') reported.textContent = '今日は未完了で報告済み。罰を執行して明日から再スタート。';
+    const dayWord = isYesterday ? '昨日' : '今日';
+    if (report?.status === 'done') reported.textContent = `${dayWord}のルーティン完了！明日も続けよう 🔥`;
+    if (report?.status === 'failed') reported.textContent = `${dayWord}は未完了で報告済み。罰を執行して明日から再スタート。`;
 
     const now = new Date();
     const left = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
@@ -299,7 +342,9 @@
       ? ''
       : notStarted
         ? `${fmtDate(state.startDate)}からスタートします。それまでは報告できません。`
-        : `報告の締め切りまで あと${h}時間${m}分（今日中に報告しないと連続記録がリセットされ、罰ルーレットが発生します）`;
+        : isYesterday
+          ? `昨日の分は今日中なら報告できます。締め切りまで あと${h}時間${m}分（過ぎると連続記録がリセットされ、罰ルーレットが発生します）`
+          : `今日の分は明日の終わりまで報告できます。明日の夜に思い出して報告してもOKです。`;
 
     updateReportButtons();
     renderCalendar();
@@ -342,21 +387,22 @@
   };
 
   const report = (status) => {
-    const today = todayKey();
-    if (state.reports[today]) return;
+    const date = reportDate();
+    if (state.reports[date]) return;
     const done = state.routines.filter((r) => checked.has(r.id)).map((r) => r.name);
-    state.reports[today] = { status, done };
-    if (status === 'failed') addPenalty(today, 'failed');
-    queueSync(reportEvent(today));
+    state.reports[date] = { status, done };
+    if (status === 'failed') addPenalty(date, 'failed');
+    queueSync(reportEvent(date));
     save();
     flushSync();
     checked = new Set();
+    pickedDate = null;
     renderAll();
     if (status === 'done') {
       showModal({
         kicker: 'NICE!',
         title: `${currentStreak()}日連続達成 🔥`,
-        body: '今日も自分との約束を守れました。',
+        body: `${date === todayKey() ? '今日' : '昨日'}も自分との約束を守れました。`,
       });
     } else {
       showModal({
@@ -819,6 +865,7 @@
     if (todayKey() !== lastDay) {
       lastDay = todayKey();
       checked = new Set();
+      pickedDate = null;
       reconcile();
       renderAll();
     } else {
