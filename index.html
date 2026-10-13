@@ -99,6 +99,7 @@
           <span><i class="dot done"></i>完了</span>
           <span><i class="dot failed"></i>未完了</span>
           <span><i class="dot missed"></i>未報告</span>
+          <span><i class="dot off"></i>休み</span>
         </div>
       </div>
 
@@ -140,6 +141,11 @@
             <span>開始日</span>
             <input id="profile-start" type="date" required>
           </label>
+          <label class="check">
+            <input type="checkbox" id="profile-weekdays">
+            <span>土日・祝日はお休み（平日だけカウント）</span>
+          </label>
+          <p class="hint">日本の祝日（振替休日・国民の休日を含む）は自動で判定します。平日の分は次の平日の終わりまで報告できます。</p>
           <button class="btn small">保存</button>
         </form>
       </div>
@@ -206,6 +212,7 @@
 
   <script src="sanctions.js"></script>
   <script src="presets.js"></script>
+  <script src="holidays.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

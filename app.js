@@ -47,7 +47,9 @@
     sanctions: window.DEFAULT_SANCTIONS.map((s) => ({ id: uid(), ...s })),
     wheelRotation: 0,
     syncUrl: '',
-    outbox: [], // events waiting to be sent to the spreadsheet
+    outbox: [],
+    weekdaysOnly: true, // weekends and Japanese holidays do not count
+    allDaysSince: null, // when weekdaysOnly was switched off: earlier off days stay off // events waiting to be sent to the spreadsheet
   });
 
   const load = () => {
@@ -74,13 +76,49 @@
 
   // Any past day (since the app was started) without a report counts as a
   // failure: it breaks the streak and owes one roulette spin.
+  // ---------- working days ----------
+  const isWeekend = (k) => {
+    const dow = fromKey(k).getDay();
+    return dow === 0 || dow === 6;
+  };
+  const holidayName = (k) => (window.JP_HOLIDAYS ? window.JP_HOLIDAYS.name(k) : null);
+  // A day the routine does not run on. Off days earlier than allDaysSince stay
+  // off even after weekdays-only is switched off, so old weekends never turn
+  // into missed days retroactively.
+  const isOffDay = (k) =>
+    (state.weekdaysOnly || (state.allDaysSince && k < state.allDaysSince)) && (isWeekend(k) || !!holidayName(k));
+  const offDayLabel = (k) => holidayName(k) || (isWeekend(k) ? '週末' : '休み');
+  const prevWorkday = (k) => {
+    let d = addDays(k, -1);
+    while (isOffDay(d)) d = addDays(d, -1);
+    return d;
+  };
+  const nextWorkday = (k) => {
+    let d = addDays(k, 1);
+    while (isOffDay(d)) d = addDays(d, 1);
+    return d;
+  };
+  // A working day can be reported until the end of the next working day.
+  const deadlineOf = (k) => nextWorkday(k);
+
+  // Marks working days whose deadline has passed as missed (streak break plus
+  // one roulette spin). Off days never count; a missed mark left on one from
+  // before the weekdays-only rule applied is removed together with its
+  // penalty, unless that penalty was already carried out.
   const reconcile = () => {
     if (!state.setupDone) return;
-    // Yesterday can still be reported today, so only older days count as missed.
-    const yesterday = addDays(todayKey(), -1);
+    const today = todayKey();
     let changed = false;
-    for (let d = state.startDate; d < yesterday; d = addDays(d, 1)) {
-      if (!state.reports[d]) {
+    for (let d = state.startDate; d < today; d = addDays(d, 1)) {
+      if (isOffDay(d)) {
+        if (state.reports[d]?.status === 'missed') {
+          delete state.reports[d];
+          state.penalties = state.penalties.filter((p) => !(p.date === d && !p.doneAt));
+          changed = true;
+        }
+        continue;
+      }
+      if (!state.reports[d] && deadlineOf(d) < today) {
         state.reports[d] = { status: 'missed', done: [] };
         addPenalty(d, 'missed');
         queueSync(reportEvent(d));
@@ -113,6 +151,7 @@
     startDate: state.startDate,
     routines: state.routines.map((r) => r.name),
     sanctions: state.sanctions.map(({ title, detail, color, weight }) => ({ title, detail, color, weight })),
+    weekdaysOnly: state.weekdaysOnly,
   });
 
   const penaltyEvent = (p, event) => ({
@@ -175,14 +214,16 @@
   const currentStreak = () => {
     const today = todayKey();
     let n = 0;
-    let d = today;
-    // Days still open for reporting (today, and yesterday until today ends)
-    // do not break the streak.
-    if (!state.reports[d]) d = addDays(d, -1);
-    if (!state.reports[d] && openDays().includes(d)) d = addDays(d, -1);
-    while (d >= state.startDate && state.reports[d]?.status === 'done') {
-      n++;
-      d = addDays(d, -1);
+    for (let d = today; d >= state.startDate; d = addDays(d, -1)) {
+      if (isOffDay(d)) continue;
+      const r = state.reports[d];
+      if (r?.status === 'done') {
+        n++;
+        continue;
+      }
+      // Still open for reporting: does not break the streak.
+      if (!r && deadlineOf(d) >= today) continue;
+      break;
     }
     return n;
   };
@@ -192,6 +233,7 @@
     let run = 0;
     const today = todayKey();
     for (let d = state.startDate; d <= today; d = addDays(d, 1)) {
+      if (isOffDay(d)) continue;
       if (state.reports[d]?.status === 'done') {
         run++;
         best = Math.max(best, run);
@@ -203,9 +245,13 @@
   };
 
   // Days that can still be reported, oldest first: yesterday (until today ends) and today.
+  // Days that can still be reported, oldest first: the previous working day
+  // (until its deadline) and today when it is a working day.
   const openDays = () => {
     const today = todayKey();
-    return [addDays(today, -1), today].filter((d) => d >= state.startDate && !state.reports[d]);
+    return [prevWorkday(today), today].filter(
+      (d) => d >= state.startDate && !isOffDay(d) && !state.reports[d] && deadlineOf(d) >= today
+    );
   };
 
   const unspun = () => state.penalties.filter((p) => !p.sanction);
@@ -266,11 +312,13 @@
   let checked = new Set();
   let pickedDate = null; // the day the user switched the report card to
 
-  // The day being reported on: yesterday first while it is still open.
+  // The day being reported on: the previous working day first while it is
+  // still open, otherwise today. Null on an off day with nothing left open.
   const reportDate = () => {
     const open = openDays();
-    if (pickedDate && (open.includes(pickedDate) || pickedDate === todayKey())) return pickedDate;
-    return open[0] || todayKey();
+    const today = todayKey();
+    if (pickedDate && (open.includes(pickedDate) || (pickedDate === today && !isOffDay(today)))) return pickedDate;
+    return open[0] || (isOffDay(today) ? null : today);
   };
 
   const pickDate = (d) => {
@@ -279,36 +327,40 @@
     checked = new Set();
     renderHome();
   };
-  $('tab-yesterday').addEventListener('click', () => pickDate(addDays(todayKey(), -1)));
+  $('tab-yesterday').addEventListener('click', () => pickDate(prevWorkday(todayKey())));
   $('tab-today').addEventListener('click', () => pickDate(todayKey()));
 
   const renderHome = () => {
     const today = todayKey();
     const yesterday = addDays(today, -1);
+    const prev = prevWorkday(today);
+    const todayOff = isOffDay(today);
     const date = reportDate();
-    const isYesterday = date === yesterday;
+    const isPrev = date !== null && date !== today;
+    const prevWord = prev === yesterday ? '昨日' : '前回';
     const streak = currentStreak();
     $('streak-num').textContent = streak;
     $('streak-num').classList.toggle('zero', streak === 0);
     $('best-num').textContent = bestStreak();
-    $('report-title').textContent = isYesterday ? '昨日の報告' : '今日の報告';
-    $('today-date').textContent = fmtDate(date);
+    $('report-title').textContent = date === null ? '今日はお休み' : isPrev ? `${prevWord}の報告` : '今日の報告';
+    $('today-date').textContent = fmtDate(date || today);
 
-    const yesterdayOpen = openDays().includes(yesterday);
-    $('day-tabs').classList.toggle('hidden', !yesterdayOpen);
-    if (yesterdayOpen) {
-      $('tab-yesterday').replaceChildren(`昨日 ${fmtDate(yesterday)} `, el('span', { class: 'pending' }, '未報告'));
-      const todayReported = !!state.reports[today];
-      $('tab-today').textContent = `今日 ${fmtDate(today)}${todayReported ? ' 報告済み' : ''}`;
-      $('tab-yesterday').classList.toggle('active', isYesterday);
-      $('tab-today').classList.toggle('active', !isYesterday);
-      $('tab-yesterday').setAttribute('aria-selected', String(isYesterday));
-      $('tab-today').setAttribute('aria-selected', String(!isYesterday));
+    const open = openDays();
+    const showTabs = open.includes(prev) && !todayOff;
+    $('day-tabs').classList.toggle('hidden', !showTabs);
+    if (showTabs) {
+      $('tab-yesterday').replaceChildren(`${prevWord} ${fmtDate(prev)} `, el('span', { class: 'pending' }, '未報告'));
+      $('tab-today').textContent = `今日 ${fmtDate(today)}${state.reports[today] ? ' 報告済み' : ''}`;
+      $('tab-yesterday').classList.toggle('active', isPrev);
+      $('tab-today').classList.toggle('active', !isPrev);
+      $('tab-yesterday').setAttribute('aria-selected', String(isPrev));
+      $('tab-today').setAttribute('aria-selected', String(!isPrev));
     }
 
-    const report = state.reports[date];
+    const report = date ? state.reports[date] : null;
     const list = $('checklist');
     list.replaceChildren();
+    list.classList.toggle('hidden', date === null);
     if (!state.routines.length) {
       list.append(el('li', { class: 'empty' }, '設定タブで毎日のルーティンを追加してください。'));
     }
@@ -325,26 +377,35 @@
       list.append(el('li', {}, el('label', {}, cb, el('span', {}, r.name))));
     }
 
-    const notStarted = date < state.startDate;
-    $('report-actions').classList.toggle('hidden', !!report || notStarted);
+    const notStarted = date !== null && date < state.startDate;
+    $('report-actions').classList.toggle('hidden', date === null || !!report || notStarted);
     const reported = $('reported');
-    reported.classList.toggle('hidden', !report);
     reported.className = `reported ${report ? report.status : ''} ${report ? '' : 'hidden'}`;
-    const dayWord = isYesterday ? '昨日' : '今日';
-    if (report?.status === 'done') reported.textContent = `${dayWord}のルーティン完了！明日も続けよう 🔥`;
-    if (report?.status === 'failed') reported.textContent = `${dayWord}は未完了で報告済み。罰を執行して明日から再スタート。`;
+    const dayWord = isPrev ? prevWord : '今日';
+    if (report?.status === 'done') reported.textContent = `${dayWord}のルーティン完了！次も続けよう 🔥`;
+    if (report?.status === 'failed') reported.textContent = `${dayWord}は未完了で報告済み。罰を執行して次から再スタート。`;
 
     const now = new Date();
     const left = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
     const h = Math.floor(left / 3.6e6);
     const m = Math.floor((left % 3.6e6) / 6e4);
-    $('deadline').textContent = report
-      ? ''
-      : notStarted
-        ? `${fmtDate(state.startDate)}からスタートします。それまでは報告できません。`
-        : isYesterday
-          ? `昨日の分は今日中なら報告できます。締め切りまで あと${h}時間${m}分（過ぎると連続記録がリセットされ、罰ルーレットが発生します）`
-          : `今日の分は明日の終わりまで報告できます。明日の夜に思い出して報告してもOKです。`;
+    const offNote = todayOff ? `今日は${offDayLabel(today)}のためお休みです。` : '';
+    let deadlineText = '';
+    if (date === null) {
+      deadlineText = `${offNote}次のルーティンは${fmtDate(nextWorkday(today))}からです。`;
+    } else if (report) {
+      deadlineText = offNote;
+    } else if (notStarted) {
+      deadlineText = `${fmtDate(state.startDate)}からスタートします。それまでは報告できません。`;
+    } else {
+      const dl = deadlineOf(date);
+      const which = isPrev ? `${fmtDate(date)}の分` : '今日の分';
+      deadlineText =
+        dl === today
+          ? `${which}は今日中なら報告できます。締め切りまで あと${h}時間${m}分（過ぎると連続記録がリセットされ、罰ルーレットが発生します）`
+          : `${offNote}${which}は${fmtDate(dl)}の終わりまで報告できます。`;
+    }
+    $('deadline').textContent = deadlineText;
 
     updateReportButtons();
     renderCalendar();
@@ -365,10 +426,10 @@
     const today = todayKey();
     for (let i = 13; i >= 0; i--) {
       const k = addDays(today, -i);
-      const status = state.reports[k]?.status || '';
+      const status = state.reports[k]?.status || (isOffDay(k) ? 'off' : '');
       const d = fromKey(k);
       cal.append(
-        el('div', { class: `day ${status} ${k === today ? 'today' : ''}`, title: k },
+        el('div', { class: `day ${status} ${k === today ? 'today' : ''}`, title: status === 'off' ? `${k} ${offDayLabel(k)}` : k },
           el('b', {}, String(d.getDate())), WEEK[d.getDay()])
       );
     }
@@ -388,7 +449,7 @@
 
   const report = (status) => {
     const date = reportDate();
-    if (state.reports[date]) return;
+    if (!date || state.reports[date]) return;
     const done = state.routines.filter((r) => checked.has(r.id)).map((r) => r.name);
     state.reports[date] = { status, done };
     if (status === 'failed') addPenalty(date, 'failed');
@@ -660,6 +721,7 @@
   const renderSettings = () => {
     $('profile-name').value = state.name;
     $('profile-start').value = state.startDate;
+    $('profile-weekdays').checked = !!state.weekdaysOnly;
     $('sync-url').value = state.syncUrl;
     renderSyncStatus();
 
@@ -714,10 +776,15 @@
     const name = $('profile-name').value.trim();
     const start = $('profile-start').value;
     if (!name || !start) return;
+    const weekdaysOnly = $('profile-weekdays').checked;
     const startChanged = start !== state.startDate;
     const apply = () => {
       state.name = name;
       state.startDate = start;
+      // Switching weekends on keeps earlier weekends off, so nothing in the
+      // past becomes a missed day.
+      if (state.weekdaysOnly && !weekdaysOnly) state.allDaysSince = todayKey();
+      state.weekdaysOnly = weekdaysOnly;
       saveSettings();
       reconcile();
       renderAll();
@@ -936,6 +1003,7 @@
     for (const r of data.reports) next.reports[r.date] = { status: r.status, done: r.done };
     const dates = Object.keys(next.reports).sort();
     next.startDate = data.settings?.startDate || dates[0] || todayKey();
+    next.weekdaysOnly = data.settings?.weekdaysOnly ?? true;
 
     for (const d of dates) {
       const { status } = next.reports[d];

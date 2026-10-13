@@ -19,7 +19,7 @@ const REASON_LABEL = { failed: '未完了', missed: '未報告' };
 
 const REPORT_HEADER = ['受信日時', '名前', '日付', '結果', '連続日数', '達成数', '項目数', 'チェック内容'];
 const PENALTY_HEADER = ['受信日時', '名前', '対象日', '理由', '内容', '状態'];
-const SETTINGS_HEADER = ['受信日時', '名前', '開始日', 'チェックリスト', '罰の一覧'];
+const SETTINGS_HEADER = ['受信日時', '名前', '開始日', 'チェックリスト', '罰の一覧', '平日のみ'];
 
 function doPost(e) {
   const data = JSON.parse(e.postData.contents);
@@ -59,6 +59,7 @@ function doPost(e) {
       "'" + data.startDate,
       JSON.stringify(data.routines || []),
       JSON.stringify(data.sanctions || []),
+      data.weekdaysOnly === false ? 'いいえ' : 'はい',
     ]);
   }
 
@@ -77,6 +78,7 @@ function doGet(e) {
         startDate: asDateKey(r[2]),
         routines: parseJson(r[3], []),
         sanctions: parseJson(r[4], []),
+        weekdaysOnly: r[5] !== 'いいえ', // older sheets have no column: weekdays only
       };
     });
 

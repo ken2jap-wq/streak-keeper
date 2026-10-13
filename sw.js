@@ -1,5 +1,5 @@
 // Offline cache so the app opens instantly from the home screen.
-const CACHE = 'streak-keeper-v4';
+const CACHE = 'streak-keeper-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const ASSETS = [
   './app.js',
   './sanctions.js',
   './presets.js',
+  './holidays.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
